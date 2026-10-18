@@ -9,24 +9,24 @@
 
 Under the WHO 2021 Classification of CNS Tumors, preoperative glioma characterization relies on molecular and proliferative biomarkers—specifically **Isocitrate Dehydrogenase-1 (IDH1)** mutation status and the **Ki-67 (MIB-1)** proliferation index—which traditionally require invasive neurosurgical biopsy. Conventional mono-exponential Diffusion-Weighted Imaging (ADC) conflates true restricted water diffusion within hypercellular tumor tissue with capillary microcirculation.
 
-**Intravoxel Incoherent Motion (IVIM-DWI)** utilizes multi-$b$-value diffusion acquisitions ($0\text{–}2000\text{ s/mm}^2$) to separate parenchymal diffusivity from microvascular perfusion without exogenous gadolinium contrast:
+**Intravoxel Incoherent Motion (IVIM-DWI)** utilizes multi-*b*-value diffusion acquisitions (0–2000 s/mm²) to separate parenchymal diffusivity from microvascular perfusion without exogenous gadolinium contrast:
 
-$$\frac{S(b)}{S_0} = f \cdot \exp(-b \cdot D^*) + (1 - f) \cdot \exp(-b \cdot D)$$
+$$\frac{S(b)}{S_0} = f \cdot \exp(-b \cdot D^{*}) + (1 - f) \cdot \exp(-b \cdot D)$$
 
-* **$D$ (True Diffusion Coefficient, $\times 10^{-3}\text{ mm}^2/\text{s}$):** Reflects pure intracellular/extracellular water mobility inversely correlated with tumor cellularity.
-* **$D^*$ (Pseudo-Diffusion Coefficient, $\times 10^{-3}\text{ mm}^2/\text{s}$):** Reflects incoherent blood flow velocity within the randomly oriented capillary network.
-* **$f$ (Perfusion Fraction, $\%$):** Reflects the fractional volume of capillary microcirculation within each voxel.
+* ***D* (True Diffusion Coefficient, × 10⁻³ mm²/s):** Reflects pure intracellular/extracellular water mobility inversely correlated with tumor cellularity.
+* ***D*\* (Pseudo-Diffusion Coefficient, × 10⁻³ mm²/s):** Reflects incoherent blood flow velocity within the randomly oriented capillary network.
+* ***f* (Perfusion Fraction, %):** Reflects the fractional volume of capillary microcirculation within each voxel.
 
 ---
 
 ## 2. Key Pipeline Features
 
-1. **Multi-Direction Shell Averaging (Powder Averaging):** Automatically groups and averages multi-directional diffusion volumes (e.g., 298-volume `.bval`/`.bvec` acquisitions) into isotropic $b$-value shells prior to curve fitting to eliminate white matter anisotropy bias.
-2. **Automated 3D $b_0$ Brain Extraction (Skull Stripping):** Uses 3D Otsu thresholding (`dipy.segment.mask.median_otsu`), 3D largest connected-component isolation, and morphological erosion on the $b_0$ volume to strip low-SNR background air, scalp fat, skull marrow, and paranasal sinuses before fitting—eliminating extra-cranial outlier artifacts.
+1. **Multi-Direction Shell Averaging (Powder Averaging):** Automatically groups and averages multi-directional diffusion volumes (e.g., 298-volume `.bval`/`.bvec` acquisitions) into isotropic *b*-value shells prior to curve fitting to eliminate white matter anisotropy bias.
+2. **Automated 3D *b*₀ Brain Extraction (Skull Stripping):** Uses 3D Otsu thresholding (`dipy.segment.mask.median_otsu`), 3D largest connected-component isolation, and morphological erosion on the *b*₀ volume to strip low-SNR background air, scalp fat, skull marrow, and paranasal sinuses before fitting—eliminating extra-cranial outlier artifacts.
 3. **Two-Step Segmented Bi-Exponential Fitting:**
-   * **Step 1 ($b \ge b_{\text{cutoff}}$, default $200\text{ s/mm}^2$):** Fits mono-exponential decay $\ln(S(b)/S_0) = \ln(1 - f_{\text{init}}) - bD$ at high $b$-values where microvascular pseudo-diffusion is negligible.
-   * **Step 2 (Fixed $D$):** Holds $D$ fixed from Step 1 and fits $D^*$ and $f$ across low/all $b$-values within physiological cerebral bounds ($D \in [0, 4.0]\times 10^{-3}\text{ mm}^2/\text{s}$, $D^* \in [D, 50.0]\times 10^{-3}\text{ mm}^2/\text{s}$, $f \in [0, 40.0]\%$).
-4. **Interactive Drag-and-Drop GUI (`ivim_gui.py`):** Supports both raw 3T DICOM folders and NIfTI files, prompts for the cutoff $b$-value prior to fitting, and tags all generated NIfTI maps with the selected cutoff (e.g., `_b200_D_map.nii.gz`).
+   * **Step 1 (*b* ≥ *b*<sub>cutoff</sub>, default 200 s/mm²):** Fits mono-exponential decay `ln(S(b) / S₀) = ln(1 - f_init) - b·D` at high *b*-values where microvascular pseudo-diffusion is negligible.
+   * **Step 2 (Fixed *D*):** Holds *D* fixed from Step 1 and fits *D*\* and *f* across low/all *b*-values within physiological cerebral bounds (*D* ∈ [0, 4.0] × 10⁻³ mm²/s, *D*\* ∈ [*D*, 50.0] × 10⁻³ mm²/s, *f* ∈ [0, 40.0]%).
+4. **Interactive Drag-and-Drop GUI (`ivim_gui.py`):** Supports both raw 3T DICOM folders and NIfTI files, prompts for the cutoff *b*-value prior to fitting, and tags all generated NIfTI maps with the selected cutoff (e.g., `_b200_D_map.nii.gz`).
 5. **3D Slicer Co-Registration & Single-Row Statistical Export (`slicer_ivim_pipeline.py`):** Automatically co-registers structural scans (`T1+C`, `FLAIR`, `T2W`, `T1W`) to the skull-stripped `b0_ref` volume using 12-DOF Rigid + Affine `BRAINSFit`, generates 5-mm concentric peritumoral shells, and exports `Mean`, `SD`, `Min`, `Max`, and contralateral normalized ratios (`rD`, `rD*`, `rf`) across all ROIs as a single horizontal row per patient for direct import into IBM SPSS.
 
 ---
@@ -70,31 +70,31 @@ Glioma-IVIM/
 
 ### Workflow A: Interactive Single-Patient GUI (`ivim_gui.py`)
 
-Use `ivim_gui.py` during the pilot feasibility phase to test different $b$-value cutoffs (e.g., `b150` vs. `b200` vs. `b250`) or process individual patient scans:
+Use `ivim_gui.py` during the pilot feasibility phase to test different *b*-value cutoffs (e.g., `b150` vs. `b200` vs. `b250`) or process individual patient scans:
 
 1. Launch the GUI from Command Prompt:
    ```cmd
    python ivim_gui.py
    ```
 2. **Drag and Drop Input:**
-   * Drag a **raw 3T DICOM patient folder** directly onto the window (automatically converts via `dcm2niix` into a `Converted_NIfTI` subfolder and selects the multi-$b$ IVIM series), **OR**
+   * Drag a **raw 3T DICOM patient folder** directly onto the window (automatically converts via `dcm2niix` into a `Converted_NIfTI` subfolder and selects the multi-*b* IVIM series), **OR**
    * Drag a pre-converted **`.nii` / `.nii.gz` file** (automatically pairs with its companion `.bval` and `.bvec`/`.bvac` files).
-3. **Confirm Cutoff $b$-Value:**
-   * A popup dialog displays the total number of volumes (e.g., `298`) and all unique $b$-value shells detected in the scan.
-   * Enter your desired cutoff $b$-value (default: `200` $\text{s/mm}^2$) and click **OK**.
+3. **Confirm Cutoff *b*-Value:**
+   * A popup dialog displays the total number of volumes (e.g., `298`) and all unique *b*-value shells detected in the scan.
+   * Enter your desired cutoff *b*-value (default: `200` s/mm²) and click **OK**.
 4. **Tagged Output Files:**
    * Creates a folder named `<scan_prefix>_IVIM_Maps_b200` containing:
-     * `<scan_prefix>_b200_b0_ref.nii.gz` *(Skull-stripped $b_0$ anatomical reference)*
+     * `<scan_prefix>_b200_b0_ref.nii.gz` *(Skull-stripped b₀ anatomical reference)*
      * `<scan_prefix>_b200_b0_brain_mask.nii.gz` *(3D binary brain mask)*
-     * `<scan_prefix>_b200_D_map.nii.gz` *(True diffusion $D$ in $10^{-3}\text{ mm}^2/\text{s}$)*
-     * `<scan_prefix>_b200_D_star_map.nii.gz` *(Pseudo-diffusion $D^*$ in $10^{-3}\text{ mm}^2/\text{s}$)*
-     * `<scan_prefix>_b200_f_map.nii.gz` *(Perfusion fraction $f$ in $\%$)*
+     * `<scan_prefix>_b200_D_map.nii.gz` *(True diffusion D in 10⁻³ mm²/s)*
+     * `<scan_prefix>_b200_D_star_map.nii.gz` *(Pseudo-diffusion D* in 10⁻³ mm²/s)*
+     * `<scan_prefix>_b200_f_map.nii.gz` *(Perfusion fraction f in %)*
 
 ---
 
 ### Workflow B: Automated 45-Patient Batch Processing (`batch_1_dicom_to_ivim.py`)
 
-To process your entire 45-patient prospective cohort automatically:
+To process your entire prospective cohort automatically:
 
 1. Organize your main cohort directory on your hard drive:
    ```text
@@ -111,7 +111,7 @@ To process your entire 45-patient prospective cohort automatically:
    ```cmd
    python batch_1_dicom_to_ivim.py
    ```
-3. For every patient folder, the script automatically converts raw DICOMs into `Patient_XX\NIfTI_Ready\`, skull-strips the $b_0$ volume, and generates `b0_ref.nii.gz`, `b0_brain_mask.nii.gz`, `D_map.nii.gz`, `D_star_map.nii.gz`, and `f_map.nii.gz`.
+3. For every patient folder, the script automatically converts raw DICOMs into `Patient_XX\NIfTI_Ready\`, skull-strips the *b*₀ volume, and generates `b0_ref.nii.gz`, `b0_brain_mask.nii.gz`, `D_map.nii.gz`, `D_star_map.nii.gz`, and `f_map.nii.gz`.
 
 ---
 
@@ -123,7 +123,7 @@ To process your entire 45-patient prospective cohort automatically:
    ```python
    load_and_register("Patient_01")
    ```
-   * Loads `b0_ref`, `D_map`, `D_star_map`, and `f_map` with clinical `Rainbow` lookup tables (`0.0–3.0` for $D$, `0.0–50.0` for $D^*$, `0.0–40.0` for $f$).
+   * Loads `b0_ref`, `D_map`, `D_star_map`, and `f_map` with clinical `Rainbow` lookup tables (`0.0–3.0` for *D*, `0.0–50.0` for *D*\*, `0.0–40.0` for *f*).
    * Co-registers all structural sequences (`T1+C`, `FLAIR`, `T2W`) to the skull-stripped `b0_ref` volume using **Rigid (6 DOF) + Affine (12 DOF)** `BRAINSFit` alignment.
    * Initializes a `Segmentation` node named `ROIs` with pre-labeled segments: `Core`, `InnerRim_Edema`, `OuterRim`, `Perilesional`, and `Contra_NAWM`.
 4. **Delineate ROIs (Blinded to Histopathology, Axial Plane Only):**
@@ -148,9 +148,9 @@ Open `All_45_Patients_IVIM_Stats.csv` and paste the extracted rows directly into
 
 ### Summary of Statistical Plan (IBM SPSS / R)
 * **Normality Testing:** Shapiro–Wilk test on all continuous variables (`Mean ± SD` for parametric; `Median [IQR]` for non-parametric).
-* **Binary Group Comparisons (LGG [WHO Grade 1–2] vs. HGG [WHO Grade 3–4], IDH-mutant [$\ge 10\%$] vs. IDH-wildtype [$< 10\%$], High Ki-67 [$\ge 10\%$] vs. Low Ki-67 [$< 10\%$]):** Independent samples *t*-test (parametric) or Mann–Whitney *U* test (non-parametric).
+* **Binary Group Comparisons (LGG vs. HGG, IDH-mutant [≥ 10%] vs. IDH-wildtype [< 10%], High Ki-67 [≥ 10%] vs. Low Ki-67 [< 10%]):** Independent samples *t*-test (parametric) or Mann–Whitney *U* test (non-parametric).
 * **Multi-Grade Comparisons (WHO Grades 2, 3, and 4):** One-way ANOVA or Kruskal–Wallis test with post-hoc Bonferroni–Dunn correction.
-* **Proliferation Correlation:** Pearson’s ($r$) or Spearman’s rank ($\rho$) correlation with continuous Ki-67 index (%).
+* **Proliferation Correlation:** Pearson’s (*r*) or Spearman’s rank (*ρ*) correlation with continuous Ki-67 index (%).
 * **Diagnostic Performance:** Receiver Operating Characteristic (ROC) curve analysis (AUC with 95% CI, sensitivity, specificity), optimal cutoffs via Youden’s index, binary logistic regression for multi-parameter combinations, and DeLong’s test for AUC comparisons.
 * **Within-Patient Spatial Gradients (Core vs. Inner Rim vs. Outer Rim vs. Perilesional vs. Contralateral NAWM):** Repeated Measures ANOVA (parametric) or Friedman test (non-parametric).
 * **Confounder & Reliability Analyses:** Stratified subgroup analysis for prior corticosteroid exposure (`0 = Naive`, `1 = Exposed`) and Intraclass Correlation Coefficient (ICC with 95% CI) across two blinded radiologists.
