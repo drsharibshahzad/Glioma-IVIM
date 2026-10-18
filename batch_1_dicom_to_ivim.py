@@ -10,14 +10,12 @@ from dipy.segment.mask import median_otsu
 
 # ================= CONFIGURATION =================
 COHORT_DIR = r"C:\IVIM_Thesis_Cohort"
-SPLIT_B = 200.0             # Threshold b-value (200 s/mm^2)
 
 # Physiological upper bounds (Federau 2017 & Glioma IVIM standards)
 MAX_D = 4.0       # x 10^-3 mm^2/s (0.004 mm^2/s)
 MAX_DSTAR = 50.0  # x 10^-3 mm^2/s (0.050 mm^2/s)
 MAX_F = 40.0      # % (0.40 perfusion fraction)
 # =================================================
-
 
 def find_dcm2niix():
     exe = shutil.which("dcm2niix")
@@ -28,12 +26,11 @@ def find_dcm2niix():
         return py_scripts
     return "dcm2niix"
 
-
-def extract_brain_mask_b0(S0, affine, header, out_dir, prefix=""):
+def extract_brain_mask_b0(S0, affine, header, out_dir, b_tag, prefix=""):
     """Generates a 3D binary brain mask and skull-stripped b0 volume."""
-    raw_b0_path = os.path.join(out_dir, f"{prefix}b0_raw.nii.gz")
-    brain_b0_path = os.path.join(out_dir, f"{prefix}b0_ref.nii.gz")
-    mask_path = os.path.join(out_dir, f"{prefix}b0_brain_mask.nii.gz")
+    raw_b0_path = os.path.join(out_dir, f"{prefix}b0_raw_{b_tag}.nii.gz")
+    brain_b0_path = os.path.join(out_dir, f"{prefix}b0_ref_{b_tag}.nii.gz")
+    mask_path = os.path.join(out_dir, f"{prefix}b0_brain_mask_{b_tag}.nii.gz")
 
     nib.save(nib.Nifti1Image(S0.astype(np.float32), affine, header), raw_b0_path)
 
@@ -65,10 +62,10 @@ def extract_brain_mask_b0(S0, affine, header, out_dir, prefix=""):
     nib.save(nib.Nifti1Image(mask.astype(np.uint8), affine, header), mask_path)
     return S0_brain, mask
 
-
-def fit_ivim_from_nifti(dwi_path, bval_path, out_dir, cutoff_b=SPLIT_B, prefix=""):
+def fit_ivim_from_nifti(dwi_path, bval_path, out_dir, cutoff_b, prefix=""):
     img = nib.load(dwi_path)
     data = img.get_fdata(dtype=np.float32)
+    b_tag = f"b{int(cutoff_b)}"
 
     with open(bval_path, "r") as f:
         bvals = np.array([float(x) for x in f.read().split()], dtype=np.float32)
@@ -89,7 +86,7 @@ def fit_ivim_from_nifti(dwi_path, bval_path, out_dir, cutoff_b=SPLIT_B, prefix="
 
     b0_mask = unique_b <= 5
     S0_raw = np.mean(shell_data[..., b0_mask], axis=-1) if np.any(b0_mask) else shell_data[..., 0]
-    _, brain_mask = extract_brain_mask_b0(S0_raw, img.affine, img.header, out_dir, prefix=prefix)
+    _, brain_mask = extract_brain_mask_b0(S0_raw, img.affine, img.header, out_dir, b_tag, prefix=prefix)
 
     for i in range(len(unique_b)):
         shell_data[..., i] = gaussian_filter(shell_data[..., i], sigma=(0.6, 0.6, 0.3))
@@ -138,21 +135,25 @@ def fit_ivim_from_nifti(dwi_path, bval_path, out_dir, cutoff_b=SPLIT_B, prefix="
     D_star_map[brain_mask] = np.clip(D_star_vox * 1000.0, 0.0, MAX_DSTAR)
     f_map[brain_mask] = np.clip(f_vox * 100.0, 0.0, MAX_F)
 
-    nib.save(nib.Nifti1Image(D_map, img.affine, img.header), os.path.join(out_dir, f"{prefix}D_map.nii.gz"))
-    nib.save(nib.Nifti1Image(D_star_map, img.affine, img.header), os.path.join(out_dir, f"{prefix}D_star_map.nii.gz"))
-    nib.save(nib.Nifti1Image(f_map, img.affine, img.header), os.path.join(out_dir, f"{prefix}f_map.nii.gz"))
+    nib.save(nib.Nifti1Image(D_map, img.affine, img.header), os.path.join(out_dir, f"{prefix}D_map_{b_tag}.nii.gz"))
+    nib.save(nib.Nifti1Image(D_star_map, img.affine, img.header), os.path.join(out_dir, f"{prefix}D_star_map_{b_tag}.nii.gz"))
+    nib.save(nib.Nifti1Image(f_map, img.affine, img.header), os.path.join(out_dir, f"{prefix}f_map_{b_tag}.nii.gz"))
 
     return True, (
-        f"Success! Skull-stripped maps saved.\n"
+        f"Success! {b_tag} Skull-stripped maps saved.\n"
         f"   -> Brain Mean ± SD | D: {D_map[brain_mask].mean():.2f}±{D_map[brain_mask].std():.2f}, "
         f"D*: {D_star_map[brain_mask].mean():.2f}±{D_star_map[brain_mask].std():.2f}, "
         f"f: {f_map[brain_mask].mean():.2f}±{f_map[brain_mask].std():.2f}%"
     )
 
-
-def process_all_patients():
+def process_all_patients(cutoff_b):
     dcm2niix_exe = find_dcm2niix()
     patient_dirs = sorted(glob.glob(os.path.join(COHORT_DIR, "Patient_*")))
+    
+    if not patient_dirs:
+        print(f"\n[Warning] No folders starting with 'Patient_' found in {COHORT_DIR}")
+        return
+
     for p_dir in patient_dirs:
         p_name = os.path.basename(p_dir)
         raw_dicom = os.path.join(p_dir, "Raw_DICOM")
@@ -170,13 +171,31 @@ def process_all_patients():
             nii_candidates = [
                 f for f in glob.glob(base + ".nii*")
                 if not f.endswith(("_map.nii.gz", "_ref.nii.gz", "_mask.nii.gz", "_raw.nii.gz"))
+                and "_b" not in os.path.basename(f) # Ignore already generated maps
             ]
             if nii_candidates:
-                ok, msg = fit_ivim_from_nifti(nii_candidates[0], bval_file, nifti_dir, cutoff_b=SPLIT_B, prefix="")
+                ok, msg = fit_ivim_from_nifti(nii_candidates[0], bval_file, nifti_dir, cutoff_b, prefix="")
                 print(f"[{p_name}] {msg}")
                 if ok:
                     break
 
 
 if __name__ == "__main__":
-    process_all_patients()
+    print("\n" + "="*50)
+    print(" Glioma IVIM-DWI Batch Processor")
+    print("="*50)
+    
+    # Prompt the user for the cutoff b-value before starting
+    user_input = input("\nEnter the cutoff b-value (s/mm²) to separate perfusion from diffusion [Press Enter for default: 200]: ").strip()
+    
+    try:
+        cutoff_b = float(user_input) if user_input else 200.0
+    except ValueError:
+        print("\nInvalid input detected. Defaulting to 200.0 s/mm².")
+        cutoff_b = 200.0
+        
+    print(f"\nStarting batch processing for all patients using cutoff b = {cutoff_b} s/mm²...\n")
+    
+    process_all_patients(cutoff_b)
+    
+    print("\nBatch processing complete.")
