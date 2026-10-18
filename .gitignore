@@ -1,0 +1,27 @@
+# Byte-compiled / cache files
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+.venv
+venv/
+
+# Prevent patient imaging data from being pushed to GitHub
+*.dcm
+*.DCM
+*.ima
+*.IMA
+*.nii
+*.nii.gz
+*.bval
+*.bvec
+*.bvac
+*.mrb
+*.nrrd
+
+# Cohort directories
+Patient_*/
+Raw_DICOM/
+NIfTI_Ready/
+Converted_NIfTI/
+*_IVIM_Maps*/

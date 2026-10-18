@@ -1,0 +1,7 @@
+numpy>=1.24.0
+scipy>=1.10.0
+nibabel>=5.0.0
+dipy>=1.7.0
+PyQt5>=5.15.0
+matplotlib>=3.7.0
+dcm2niix>=1.0.20220715
