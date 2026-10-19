@@ -13,20 +13,58 @@ ROI_NAMES = ["Core", "InnerRim_Edema", "OuterRim", "Perilesional", "Contra_NAWM"
 # =================================================
 
 
-def load_and_register(patient_folder_name):
+def find_map_file(search_dirs, pattern_End):
+    """Finds a map file matching pattern_End across candidate directories."""
+    for d in search_dirs:
+        if not os.path.exists(d):
+            continue
+        # Match both *b0_ref.nii.gz and *b0_ref_b200.nii.gz styles
+        matches = glob.glob(os.path.join(d, f"*{pattern_End}*.nii*"))
+        if matches:
+            return sorted(matches)[-1]
+    return None
+
+
+def load_and_register(patient_folder_name, b_cutoff=None):
     """
-    Loads skull-stripped b0_ref, D, D*, and f maps, applies clinical Rainbow colormaps,
-    co-registers structural scans (T1C, FLAIR, T2, T1) using Rigid + Affine BRAINSFit,
+    Auto-detects and loads skull-stripped b0_ref, D, D*, and f maps (with any prefix or b-tag),
+    applies clinical Rainbow colormaps, co-registers structural scans (T1C, FLAIR, T2, T1),
     and initializes pre-labeled ROI segments in Segment Editor.
     """
     slicer.mrmlScene.Clear(0)
-    p_dir = os.path.join(COHORT_DIR, patient_folder_name, "NIfTI_Ready")
+    p_root = os.path.join(COHORT_DIR, patient_folder_name)
+    if not os.path.exists(p_root):
+        raise FileNotFoundError(f"Patient folder not found: {p_root}")
 
-    b0_node = slicer.util.loadVolume(os.path.join(p_dir, "b0_ref.nii.gz"))
-    d_node = slicer.util.loadVolume(os.path.join(p_dir, "D_map.nii.gz"))
-    ds_node = slicer.util.loadVolume(os.path.join(p_dir, "D_star_map.nii.gz"))
-    f_node = slicer.util.loadVolume(os.path.join(p_dir, "f_map.nii.gz"))
+    # Search directly inside Patient_XX, NIfTI_Ready, and any *_IVIM_Maps* subfolders
+    subfolders = [f for f in glob.glob(os.path.join(p_root, "*")) if os.path.isdir(f)]
+    search_dirs = [p_root, os.path.join(p_root, "NIfTI_Ready")] + subfolders
 
+    tag = f"b{int(b_cutoff)}" if b_cutoff else ""
+
+    b0_path = find_map_file(search_dirs, f"{tag}_b0_ref" if tag else "b0_ref")
+    d_path = find_map_file(search_dirs, f"{tag}_D_map" if tag else "D_map")
+    ds_path = find_map_file(search_dirs, f"{tag}_D_star_map" if tag else "D_star_map")
+    f_path = find_map_file(search_dirs, f"{tag}_f_map" if tag else "f_map")
+
+    for name, path in [("b0_ref", b0_path), ("D_map", d_path), ("D_star_map", ds_path), ("f_map", f_path)]:
+        if not path or not os.path.exists(path):
+            raise FileNotFoundError(f"Could not find '{name}' inside {p_root}. Check that your maps are in this folder!")
+
+    print(f"Loading detected maps from: {os.path.dirname(b0_path)}")
+    b0_node = slicer.util.loadVolume(b0_path)
+    b0_node.SetName("b0_ref")
+
+    d_node = slicer.util.loadVolume(d_path)
+    d_node.SetName("D_map")
+
+    ds_node = slicer.util.loadVolume(ds_path)
+    ds_node.SetName("D_star_map")
+
+    f_node = slicer.util.loadVolume(f_path)
+    f_node.SetName("f_map")
+
+    # Apply Rainbow color table & clinical ranges
     rainbow_id = slicer.util.getNode("Rainbow").GetID()
     for node, upper in [(d_node, 3.0), (ds_node, 50.0), (f_node, 40.0)]:
         disp = node.GetDisplayNode()
@@ -34,10 +72,15 @@ def load_and_register(patient_folder_name):
         disp.AutoWindowLevelOff()
         disp.SetWindowLevelMinMax(0.0, upper)
 
-    anat_files = [
-        f for f in glob.glob(os.path.join(p_dir, "*.nii*"))
-        if not any(k in os.path.basename(f).lower() for k in ["b0_", "d_map", "d_star_map", "f_map", "dwi", "ivim", "ep2d"])
-    ]
+    # Find anatomical scans (T1, T1C, T2, FLAIR) in any of the patient folders
+    anat_files = []
+    for d in search_dirs:
+        if os.path.exists(d):
+            for f in glob.glob(os.path.join(d, "*.nii*")):
+                low = os.path.basename(f).lower()
+                if not any(k in low for k in ["b0_", "d_map", "d_star_map", "f_map", "dwi", "ivim", "ep2d"]):
+                    if f not in anat_files:
+                        anat_files.append(f)
 
     reg_nodes = []
     for af in anat_files:
@@ -52,11 +95,12 @@ def load_and_register(patient_folder_name):
             "initializeTransformMode": "useMomentsAlign",
             "samplingPercentage": 0.05
         }
-        print(f"Co-registering {anat_node.GetName()} to skull-stripped b0_ref (Rigid + Affine)...")
+        print(f"Co-registering {anat_node.GetName()} to b0_ref (Rigid + Affine)...")
         slicer.cli.runSync(slicer.modules.brainsfit, None, params)
         slicer.mrmlScene.RemoveNode(anat_node)
         reg_nodes.append(out_node)
 
+    # Create pre-labeled Segmentation node ready for drawing
     seg_node = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", "ROIs")
     seg_node.CreateDefaultDisplayNodes()
     master_vol = reg_nodes[0] if reg_nodes else b0_node
@@ -65,14 +109,13 @@ def load_and_register(patient_folder_name):
         seg_node.GetSegmentation().AddEmptySegment(r_name, r_name)
 
     slicer.util.selectModule("SegmentEditor")
-    print(f"=== {patient_folder_name} loaded & registered! Draw ROIs, then run: export_patient_stats('{patient_folder_name}') ===")
+    print(f"=== {patient_folder_name} loaded & ready! Draw ROIs, then run: export_patient_stats('{patient_folder_name}') ===")
 
 
 def auto_grow_shells(shell_thickness_mm=5.0):
     """
-    Optional helper: After drawing 'Core', this automatically generates 3 concentric
-    5-mm hollow rings outward ('InnerRim_Edema' 0-5mm, 'OuterRim' 5-10mm, 'Perilesional' 10-15mm)
-    restricted to the axial plane(s) containing 'Core'.
+    After drawing 'Core', automatically generates 3 concentric 5-mm hollow rings outward
+    ('InnerRim_Edema' 0-5mm, 'OuterRim' 5-10mm, 'Perilesional' 10-15mm) on the active axial slice(s).
     """
     seg_node = slicer.util.getNode("ROIs")
     ref_vol = slicer.util.getNode("b0_ref")
@@ -82,14 +125,13 @@ def auto_grow_shells(shell_thickness_mm=5.0):
         raise ValueError("Please draw the 'Core' segment first before running auto_grow_shells()!")
 
     from scipy.ndimage import distance_transform_edt
-    spacing = ref_vol.GetSpacing()  # (X, Y, Z) in mm
-    inplane_spacing = (spacing[1], spacing[0])  # (Y, X) for 2D axial slices
+    spacing = ref_vol.GetSpacing()
+    inplane_spacing = (spacing[1], spacing[0])
 
     inner_arr = np.zeros_like(core_arr, dtype=np.uint8)
     outer_arr = np.zeros_like(core_arr, dtype=np.uint8)
     peri_arr = np.zeros_like(core_arr, dtype=np.uint8)
 
-    # Expand strictly on the axial slice(s) where 'Core' was drawn
     active_slices = np.where(np.any(core_arr > 0, axis=(1, 2)))[0]
     for z in active_slices:
         slice_core = core_arr[z] > 0
