@@ -27,16 +27,15 @@ def find_map_file(search_dirs, pattern_End):
 
 def load_and_register(patient_folder_name, b_cutoff=None):
     """
-    Auto-detects and loads skull-stripped b0_ref, D, D*, and f maps (with any prefix or b-tag),
-    applies clinical Rainbow colormaps, co-registers structural scans (T1C, FLAIR, T2, T1),
-    and initializes pre-labeled ROI segments in Segment Editor.
+    Auto-detects and loads skull-stripped b0_ref, D, D*, and f maps,
+    applies Rainbow colormaps, co-registers structural scans, and
+    automatically displays the color maps in the Slicer viewer panels.
     """
     slicer.mrmlScene.Clear(0)
     p_root = os.path.join(COHORT_DIR, patient_folder_name)
     if not os.path.exists(p_root):
         raise FileNotFoundError(f"Patient folder not found: {p_root}")
 
-    # Search directly inside Patient_XX, NIfTI_Ready, and any *_IVIM_Maps* subfolders
     subfolders = [f for f in glob.glob(os.path.join(p_root, "*")) if os.path.isdir(f)]
     search_dirs = [p_root, os.path.join(p_root, "NIfTI_Ready")] + subfolders
 
@@ -49,9 +48,8 @@ def load_and_register(patient_folder_name, b_cutoff=None):
 
     for name, path in [("b0_ref", b0_path), ("D_map", d_path), ("D_star_map", ds_path), ("f_map", f_path)]:
         if not path or not os.path.exists(path):
-            raise FileNotFoundError(f"Could not find '{name}' inside {p_root}. Check that your maps are in this folder!")
+            raise FileNotFoundError(f"Could not find '{name}' inside {p_root}.")
 
-    print(f"Loading detected maps from: {os.path.dirname(b0_path)}")
     b0_node = slicer.util.loadVolume(b0_path)
     b0_node.SetName("b0_ref")
 
@@ -64,15 +62,17 @@ def load_and_register(patient_folder_name, b_cutoff=None):
     f_node = slicer.util.loadVolume(f_path)
     f_node.SetName("f_map")
 
-    # Apply Rainbow color table & clinical ranges
-    rainbow_id = slicer.util.getNode("Rainbow").GetID()
+    # 1. Force Rainbow Lookup Table and physiological window/level on D, D*, and f
+    rainbow_node = slicer.mrmlScene.GetNodeByID("vtkMRMLColorTableNodeRainbow")
+    rainbow_id = rainbow_node.GetID() if rainbow_node else slicer.util.getNode("Rainbow").GetID()
+
     for node, upper in [(d_node, 3.0), (ds_node, 50.0), (f_node, 40.0)]:
         disp = node.GetDisplayNode()
         disp.SetAndObserveColorNodeID(rainbow_id)
         disp.AutoWindowLevelOff()
         disp.SetWindowLevelMinMax(0.0, upper)
 
-    # Find anatomical scans (T1, T1C, T2, FLAIR) in any of the patient folders
+    # 2. Co-register structural scans (T1, T1C, T2, FLAIR) if present
     anat_files = []
     for d in search_dirs:
         if os.path.exists(d):
@@ -95,12 +95,12 @@ def load_and_register(patient_folder_name, b_cutoff=None):
             "initializeTransformMode": "useMomentsAlign",
             "samplingPercentage": 0.05
         }
-        print(f"Co-registering {anat_node.GetName()} to b0_ref (Rigid + Affine)...")
+        print(f"Co-registering {anat_node.GetName()} to b0_ref...")
         slicer.cli.runSync(slicer.modules.brainsfit, None, params)
         slicer.mrmlScene.RemoveNode(anat_node)
         reg_nodes.append(out_node)
 
-    # Create pre-labeled Segmentation node ready for drawing
+    # 3. Create pre-labeled Segmentation node
     seg_node = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", "ROIs")
     seg_node.CreateDefaultDisplayNodes()
     master_vol = reg_nodes[0] if reg_nodes else b0_node
@@ -109,8 +109,30 @@ def load_and_register(patient_folder_name, b_cutoff=None):
         seg_node.GetSegmentation().AddEmptySegment(r_name, r_name)
 
     slicer.util.selectModule("SegmentEditor")
-    print(f"=== {patient_folder_name} loaded & ready! Draw ROIs, then run: export_patient_stats('{patient_folder_name}') ===")
 
+    # 4. Automatically display the Color Maps across the viewer panels!
+    # Red (Axial): Anatomy in background + color D_map in foreground (50% opacity overlay)
+    # Green: Color f_map | Yellow: Color D_star_map
+    red_comp = slicer.app.layoutManager().sliceWidget("Red").mrmlSliceCompositeNode()
+    red_comp.SetBackgroundVolumeID(master_vol.GetID())
+    red_comp.SetForegroundVolumeID(d_node.GetID())
+    red_comp.SetForegroundOpacity(0.5)
+
+    green_comp = slicer.app.layoutManager().sliceWidget("Green").mrmlSliceCompositeNode()
+    green_comp.SetBackgroundVolumeID(f_node.GetID())
+    green_comp.SetForegroundVolumeID(None)
+
+    yellow_comp = slicer.app.layoutManager().sliceWidget("Yellow").mrmlSliceCompositeNode()
+    yellow_comp.SetBackgroundVolumeID(ds_node.GetID())
+    yellow_comp.SetForegroundVolumeID(None)
+
+    # Set all 3 views to Axial orientation so you can compare D, D*, and f side-by-side
+    for view_name in ["Red", "Green", "Yellow"]:
+        slice_node = slicer.app.layoutManager().sliceWidget(view_name).mrmlSliceNode()
+        slice_node.SetOrientationToAxial()
+    slicer.app.layoutManager().sliceWidget("Red").sliceLogic().FitSliceToAll()
+
+    print(f"=== {patient_folder_name} loaded! Red=Anatomy+D_map overlay, Green=f_map, Yellow=D_star_map ===")
 
 def auto_grow_shells(shell_thickness_mm=5.0):
     """
