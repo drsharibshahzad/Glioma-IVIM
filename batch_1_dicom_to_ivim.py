@@ -96,11 +96,10 @@ def fit_ivim_from_nifti(dwi_path, bval_path, out_dir, cutoff_b, prefix=""):
     vox_S0 = np.maximum(S0_smooth[brain_mask], 1e-4)
     eps = 1e-6
 
-    # Step 1: Fit D using high b-values (b >= cutoff_b)
-    high_b_mask = unique_b >= cutoff_b
-    b_high = unique_b[high_b_mask]
-    S_high = np.maximum(vox_signals[:, high_b_mask], eps)
-    Y_high = np.log(np.clip(S_high / vox_S0[:, None], 1e-5, 1.0))
+   # Cap high b-values at 1500 s/mm^2 to avoid non-Gaussian kurtosis bias (Luo et al. / Su et al.)
+    high_b_mask = (unique_b >= self.cutoff_b) & (unique_b <= 1500)
+    if np.sum(high_b_mask) < 2:
+        high_b_mask = unique_b >= self.cutoff_b  # Fallback if scan only has b=0, low, and >1500
 
     A_high = np.vstack([-b_high, np.ones_like(b_high)]).T
     coeffs_high, _, _, _ = np.linalg.lstsq(A_high, Y_high.T, rcond=None)

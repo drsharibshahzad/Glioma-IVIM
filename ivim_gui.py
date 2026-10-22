@@ -116,8 +116,10 @@ class IVIMWorker(QThread):
             unique_b = np.unique(bvals_rounded)
 
             low_b_mask = (unique_b > 0) & (unique_b < self.cutoff_b)
-            high_b_mask = unique_b >= self.cutoff_b
-            b0_mask = unique_b <= 5
+            # Cap high b-values at 1500 s/mm^2 to avoid non-Gaussian kurtosis bias (Luo et al. / Su et al.)
+            high_b_mask = (unique_b >= self.cutoff_b) & (unique_b <= 1500)
+            if np.sum(high_b_mask) < 2:
+                high_b_mask = unique_b >= self.cutoff_b  # Fallback if scan only has b=0, low, and >1500
 
             if np.sum(low_b_mask) == 0 or np.sum(high_b_mask) < 2:
                 raise ValueError(
