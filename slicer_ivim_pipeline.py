@@ -13,12 +13,43 @@ ROI_NAMES = ["Core", "InnerRim_Edema", "OuterRim", "Perilesional", "Contra_NAWM"
 # =================================================
 
 
+def get_or_create_ivim_coldtohot():
+    """
+    Creates a clinical Cold-to-Hot Lookup Table (Deep Blue -> Cyan -> Green -> Yellow -> Red)
+    with index 0 set to pure black/transparent. Works on all 3D Slicer versions (including 5.12+).
+    """
+    lut_name = "IVIM_ColdToHot"
+    existing = slicer.mrmlScene.GetFirstNodeByName(lut_name)
+    if existing:
+        return existing.GetID()
+
+    color_node = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLColorTableNode", lut_name)
+    color_node.SetTypeToUser()
+    color_node.SetNumberOfColors(256)
+    color_node.SetNamesInitialised(True)
+
+    # Control points: 0.0=Deep Blue, 0.25=Cyan, 0.50=Green, 0.75=Yellow, 1.0=Bright Red
+    xp = [0.0, 0.25, 0.50, 0.75, 1.0]
+    rp = [0.0, 0.0,  0.0,  1.0,  1.0]
+    gp = [0.0, 1.0,  1.0,  1.0,  0.0]
+    bp = [0.6, 1.0,  0.0,  0.0,  0.0]
+
+    color_node.SetColor(0, "Background", 0.0, 0.0, 0.0, 0.0)
+    for i in range(1, 256):
+        x = i / 255.0
+        r = float(np.interp(x, xp, rp))
+        g = float(np.interp(x, xp, gp))
+        b = float(np.interp(x, xp, bp))
+        color_node.SetColor(i, f"val_{i}", r, g, b, 1.0)
+
+    return color_node.GetID()
+
+
 def find_map_file(search_dirs, pattern_End):
     """Finds a map file matching pattern_End across candidate directories."""
     for d in search_dirs:
         if not os.path.exists(d):
             continue
-        # Match both *b0_ref.nii.gz and *b0_ref_b200.nii.gz styles
         matches = glob.glob(os.path.join(d, f"*{pattern_End}*.nii*"))
         if matches:
             return sorted(matches)[-1]
@@ -28,28 +59,31 @@ def find_map_file(search_dirs, pattern_End):
 def load_and_register(patient_folder_name, b_cutoff=None):
     """
     Auto-detects and loads skull-stripped b0_ref, D, D*, and f maps,
-    applies Rainbow colormaps, co-registers structural scans, and
-    automatically displays the color maps in the Slicer viewer panels.
+    applies the custom IVIM_ColdToHot colormap with black background thresholding,
+    co-registers structural scans (T1C, FLAIR, T2, T1), displays the maps in Axial views,
+    and prints brain parenchymal summary statistics.
     """
     slicer.mrmlScene.Clear(0)
     p_root = os.path.join(COHORT_DIR, patient_folder_name)
     if not os.path.exists(p_root):
         raise FileNotFoundError(f"Patient folder not found: {p_root}")
 
+    # Search inside NIfTI_Ready, Patient_XX root, and any *_IVIM_Maps* subfolders
     subfolders = [f for f in glob.glob(os.path.join(p_root, "*")) if os.path.isdir(f)]
-    search_dirs = [p_root, os.path.join(p_root, "NIfTI_Ready")] + subfolders
+    search_dirs = [os.path.join(p_root, "NIfTI_Ready"), p_root] + subfolders
 
     tag = f"b{int(b_cutoff)}" if b_cutoff else ""
 
-    b0_path = find_map_file(search_dirs, f"{tag}_b0_ref" if tag else "b0_ref")
-    d_path = find_map_file(search_dirs, f"{tag}_D_map" if tag else "D_map")
-    ds_path = find_map_file(search_dirs, f"{tag}_D_star_map" if tag else "D_star_map")
-    f_path = find_map_file(search_dirs, f"{tag}_f_map" if tag else "f_map")
+    b0_path = find_map_file(search_dirs, f"b0_ref_{tag}" if tag else "b0_ref")
+    d_path = find_map_file(search_dirs, f"D_map_{tag}" if tag else "D_map")
+    ds_path = find_map_file(search_dirs, f"D_star_map_{tag}" if tag else "D_star_map")
+    f_path = find_map_file(search_dirs, f"f_map_{tag}" if tag else "f_map")
 
     for name, path in [("b0_ref", b0_path), ("D_map", d_path), ("D_star_map", ds_path), ("f_map", f_path)]:
         if not path or not os.path.exists(path):
-            raise FileNotFoundError(f"Could not find '{name}' inside {p_root}.")
+            raise FileNotFoundError(f"Could not find '{name}' inside {p_root}. Check that your maps are in this folder!")
 
+    print(f"Loading detected maps from: {os.path.dirname(b0_path)}")
     b0_node = slicer.util.loadVolume(b0_path)
     b0_node.SetName("b0_ref")
 
@@ -62,45 +96,61 @@ def load_and_register(patient_folder_name, b_cutoff=None):
     f_node = slicer.util.loadVolume(f_path)
     f_node.SetName("f_map")
 
-    # 1. Force Rainbow Lookup Table and physiological window/level on D, D*, and f
-    rainbow_node = slicer.mrmlScene.GetNodeByID("vtkMRMLColorTableNodeRainbow")
-    rainbow_id = rainbow_node.GetID() if rainbow_node else slicer.util.getNode("Rainbow").GetID()
+    # 1. Apply custom 'IVIM_ColdToHot' Lookup Table (Blue=Low, Red=High) & hide 0.0 background
+    color_id = get_or_create_ivim_coldtohot()
 
-    for node, upper in [(d_node, 3.0), (ds_node, 50.0), (f_node, 40.0)]:
+    for node, upper in [(d_node, 2.5), (ds_node, 50.0), (f_node, 30.0)]:
         disp = node.GetDisplayNode()
-        disp.SetAndObserveColorNodeID(rainbow_id)
+        disp.SetAndObserveColorNodeID(color_id)
         disp.AutoWindowLevelOff()
-        disp.SetWindowLevelMinMax(0.0, upper)
+        disp.SetWindowLevelMinMax(0.05, upper)
+        disp.SetApplyThreshold(True)
+        disp.SetLowerThreshold(0.01)
 
-    # 2. Co-register structural scans (T1, T1C, T2, FLAIR) if present
+    # Print brain parenchymal numerical summary to console for quick QC check
+    print("\n--- Brain Parenchyma QC Summary (Non-Zero Voxels) ---")
+    for name in ["D_map", "D_star_map", "f_map"]:
+        arr = slicer.util.arrayFromVolume(slicer.util.getNode(name))
+        brain_vals = arr[arr > 0]
+        if brain_vals.size > 0:
+            print(
+                f"{name:10s} | Mean: {brain_vals.mean():.3f} | Median: {np.median(brain_vals):.3f} | "
+                f"P10-P90: {np.percentile(brain_vals, 10):.2f} to {np.percentile(brain_vals, 90):.2f}"
+            )
+    print("-----------------------------------------------------\n")
+
+    # 2. Find 3D anatomical scans (T1, T1C, T2, FLAIR) and co-register to b0_ref
     anat_files = []
     for d in search_dirs:
         if os.path.exists(d):
             for f in glob.glob(os.path.join(d, "*.nii*")):
                 low = os.path.basename(f).lower()
-                if not any(k in low for k in ["b0_", "d_map", "d_star_map", "f_map", "dwi", "ivim", "ep2d"]):
+                if not any(k in low for k in ["b0_", "d_map", "d_star_map", "f_map", "dwi", "ivim", "ep2d", "brain_mask"]):
                     if f not in anat_files:
                         anat_files.append(f)
 
     reg_nodes = []
     for af in anat_files:
-        anat_node = slicer.util.loadVolume(af)
-        out_node = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode", f"Reg_{anat_node.GetName()}")
-        params = {
-            "fixedVolume": b0_node.GetID(),
-            "movingVolume": anat_node.GetID(),
-            "outputVolume": out_node.GetID(),
-            "useRigid": True,
-            "useAffine": True,
-            "initializeTransformMode": "useMomentsAlign",
-            "samplingPercentage": 0.05
-        }
-        print(f"Co-registering {anat_node.GetName()} to b0_ref...")
-        slicer.cli.runSync(slicer.modules.brainsfit, None, params)
-        slicer.mrmlScene.RemoveNode(anat_node)
-        reg_nodes.append(out_node)
+        try:
+            anat_node = slicer.util.loadVolume(af)
+            out_node = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode", f"Reg_{anat_node.GetName()}")
+            params = {
+                "fixedVolume": b0_node.GetID(),
+                "movingVolume": anat_node.GetID(),
+                "outputVolume": out_node.GetID(),
+                "useRigid": True,
+                "useAffine": True,
+                "initializeTransformMode": "useMomentsAlign",
+                "samplingPercentage": 0.05
+            }
+            print(f"Co-registering {anat_node.GetName()} to b0_ref (Rigid + Affine)...")
+            slicer.cli.runSync(slicer.modules.brainsfit, None, params)
+            slicer.mrmlScene.RemoveNode(anat_node)
+            reg_nodes.append(out_node)
+        except Exception as e:
+            print(f"Skipped co-registration for {os.path.basename(af)}: {e}")
 
-    # 3. Create pre-labeled Segmentation node
+    # 3. Create pre-labeled Segmentation node ready for drawing
     seg_node = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", "ROIs")
     seg_node.CreateDefaultDisplayNodes()
     master_vol = reg_nodes[0] if reg_nodes else b0_node
@@ -110,8 +160,8 @@ def load_and_register(patient_folder_name, b_cutoff=None):
 
     slicer.util.selectModule("SegmentEditor")
 
-    # 4. Automatically display the Color Maps across the viewer panels!
-    # Red (Axial): Anatomy in background + color D_map in foreground (50% opacity overlay)
+    # 4. Automatically display the ColdToHot Color Maps across the viewer panels
+    # Red: Anatomy in background + color D_map overlay (50% opacity)
     # Green: Color f_map | Yellow: Color D_star_map
     red_comp = slicer.app.layoutManager().sliceWidget("Red").mrmlSliceCompositeNode()
     red_comp.SetBackgroundVolumeID(master_vol.GetID())
@@ -126,13 +176,13 @@ def load_and_register(patient_folder_name, b_cutoff=None):
     yellow_comp.SetBackgroundVolumeID(ds_node.GetID())
     yellow_comp.SetForegroundVolumeID(None)
 
-    # Set all 3 views to Axial orientation so you can compare D, D*, and f side-by-side
     for view_name in ["Red", "Green", "Yellow"]:
         slice_node = slicer.app.layoutManager().sliceWidget(view_name).mrmlSliceNode()
         slice_node.SetOrientationToAxial()
-    slicer.app.layoutManager().sliceWidget("Red").sliceLogic().FitSliceToAll()
+        slicer.app.layoutManager().sliceWidget(view_name).sliceLogic().FitSliceToAll()
 
-    print(f"=== {patient_folder_name} loaded! Red=Anatomy+D_map overlay, Green=f_map, Yellow=D_star_map ===")
+    print(f"=== {patient_folder_name} loaded with IVIM_ColdToHot colormaps! Draw ROIs, then run: export_patient_stats('{patient_folder_name}') ===")
+
 
 def auto_grow_shells(shell_thickness_mm=5.0):
     """
