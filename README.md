@@ -98,7 +98,7 @@ To process your entire prospective cohort automatically:
 
 1. Organize your main cohort directory on your hard drive:
    ```text
-   C:\IVIM_Thesis_Cohort\
+   D:\IVIM_Thesis_Cohort\
     ├── Patient_01\
     │    └── Raw_DICOM\   <-- Copy raw 3T DICOM export here
     ├── Patient_02\
@@ -138,7 +138,7 @@ To process your entire prospective cohort automatically:
    ```python
    export_patient_stats("Patient_01")
    ```
-   * Simultaneously extracts `Mean`, `SD`, `Min`, and `Max` across `D_map`, `D_star_map`, and `f_map`, computes normalized contralateral ratios (`rD_Core`, `rDstar_Core`, `rf_Core`, `rD_Edema`, `rDstar_Edema`, `rf_Edema`), and appends a single horizontal row to `C:\IVIM_Thesis_Cohort\All_45_Patients_IVIM_Stats.csv`.
+   * Simultaneously extracts `Mean`, `SD`, `Min`, and `Max` across `D_map`, `D_star_map`, and `f_map`, computes normalized contralateral ratios (`rD_Core`, `rDstar_Core`, `rf_Core`, `rD_Edema`, `rDstar_Edema`, `rf_Edema`), and appends a single horizontal row to `D:\IVIM_Thesis_Cohort\All_45_Patients_IVIM_Stats.csv`.
 
 ---
 

@@ -7,7 +7,7 @@ import vtk
 import SegmentStatistics
 
 # ================= CONFIGURATION =================
-COHORT_DIR = r"C:\IVIM_Thesis_Cohort"
+COHORT_DIR = r"D:\IVIM_Thesis_Cohort"
 MASTER_CSV = os.path.join(COHORT_DIR, "All_45_Patients_IVIM_Stats.csv")
 ROI_NAMES = ["Core", "InnerRim_Edema", "OuterRim", "Perilesional", "Contra_NAWM"]
 # =================================================

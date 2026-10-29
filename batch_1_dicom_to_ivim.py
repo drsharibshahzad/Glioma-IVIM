@@ -9,7 +9,7 @@ from scipy.ndimage import gaussian_filter, binary_fill_holes, binary_erosion, la
 from dipy.segment.mask import median_otsu
 
 # ================= CONFIGURATION =================
-COHORT_DIR = r"C:\IVIM_Thesis_Cohort"
+COHORT_DIR = r"D:\IVIM_Thesis_Cohort"
 
 # Physiological upper bounds (Federau 2017 & Glioma IVIM standards)
 MAX_D = 4.0       # x 10^-3 mm^2/s (0.004 mm^2/s)
